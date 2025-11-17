@@ -136,11 +136,18 @@ def configure_grid_options(df: pd.DataFrame) -> dict:
     cell_renderer = JsCode("""
     class UrlCellRenderer {
         init(params) {
-            this.eGui = document.createElement('a');
-            this.eGui.innerText = params.value;
-            this.eGui.setAttribute('href', 'https://ontrack-internal.amd.com/browse/' + params.value);
-            this.eGui.setAttribute('style', "text-decoration:none");
-            this.eGui.setAttribute('target', "_blank");
+            this.eGui = document.createElement('span');
+            
+            if (params.value === 'NA' || !params.value) {
+                this.eGui.innerText = params.value || '';
+            } else {
+                const link = document.createElement('a');
+                link.innerText = params.value;
+                link.setAttribute('href', 'https://ontrack-internal.amd.com/browse/' + params.value);
+                link.setAttribute('style', "text-decoration:none");
+                link.setAttribute('target', "_blank");
+                this.eGui.appendChild(link);
+            }
         }
         getGui() {
             return this.eGui;
@@ -388,7 +395,6 @@ def main():
     selected_releases = st.multiselect(
         "Select Release Version(s)",
         rocm_versions,
-        default=[rocm_versions[0]] if rocm_versions else [],
         help="Select one or more release versions to view"
     )
     
