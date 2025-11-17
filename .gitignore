@@ -1,0 +1,5 @@
+.venv
+Junk/
+.env
+./.env
+__pycache__
