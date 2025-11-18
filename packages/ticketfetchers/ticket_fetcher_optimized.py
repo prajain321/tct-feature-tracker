@@ -147,7 +147,8 @@ class TicketFetch:
             'Auto_status': "NA",
             'TMS_task': "NA",
             'TMS_status': "NA",
-            "comments": []
+            "comments": [],
+            "Effort": 'S'
         }
 
         if qa_task is None:

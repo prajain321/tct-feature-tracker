@@ -37,6 +37,9 @@ class Database:
     def delete_collection(self):
         return self.db.drop_collection(self.collection.name)
     
+    def update_effort(self, id, data):
+        return self.collection.update_one({"_id": id}, {"$set": {"Effort": data}}).acknowledged
+    
     def count(self):
         return self.collection.count_documents({})
     
@@ -50,5 +53,6 @@ class Database:
 # for i in arr:
 #     db=Database(i)
 #     print(db.delete_collection()) #db.delete_collection()
-# # db=Database('7.2')
-# # print(db.iscollection_present())
+# db=Database('7.2')
+# print(db.iscollection_present())
+# print(db.update_effort(id="SWDEV-562745" , data='XL'))

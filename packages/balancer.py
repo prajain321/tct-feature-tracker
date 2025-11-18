@@ -101,6 +101,9 @@ def force_refetch_and_update(rocm_version: str, unique_key: str):
     
     return updated_count + inserted_count > 0
 
+def update_effort(rocm_version: str, ticket_id: str, effort: str):
+    db = Database(rocm_version)
+    return db.update_effort(ticket_id,effort)
 
 def balance(rocm_version: str, unique_key: str):
     db = Database(rocm_version)

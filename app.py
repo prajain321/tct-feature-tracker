@@ -4,10 +4,13 @@ import pandas as pd
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode, DataReturnMode
 from packages.ticketfetchers.ticket_fetcher_optimized import TicketFetch
 from common import get_rocm_unique_value, get_rocm_versions
-from packages.balancer import balance, force_refetch_and_update, comments_addition
+from packages.balancer import balance, force_refetch_and_update, comments_addition, update_effort
 from datetime import datetime
+from typing import Optional, Dict, Any
 
+# Constants
 JIRA_BASE_URL = "https://ontrack-internal.amd.com/browse/"
+EFFORT_SIZES = ['S', 'M', 'L', 'XL', '2XL', '3XL', '4XL']
 
 # Page configuration
 st.set_page_config(
@@ -16,20 +19,12 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Custom CSS for better styling
+# Custom CSS
 st.markdown("""
     <style>
-    .main > div {
-        padding-top: 2rem;
-    }
-    h1 {
-        color: #1f77b4;
-        font-weight: 600;
-        margin-bottom: 2rem;
-    }
-    .stAlert {
-        margin-top: 1rem;
-    }
+    .main > div { padding-top: 2rem; }
+    h1 { color: #1f77b4; font-weight: 600; margin-bottom: 2rem; }
+    .stAlert { margin-top: 1rem; }
     .release-section {
         padding: 1rem;
         border: 1px solid #e0e0e0;
@@ -43,28 +38,24 @@ st.markdown("""
         color: #1f77b4;
         margin-bottom: 1rem;
     }
-    /* Remove white spacing/patches */
-    .block-container {
-        padding-top: 1rem;
-    }
-    div[data-testid="stVerticalBlock"] > div:has(> div.element-container) {
-        gap: 0rem;
-    }
+    .block-container { padding-top: 1rem; }
+    div[data-testid="stVerticalBlock"] > div:has(> div.element-container) { gap: 0rem; }
     </style>
 """, unsafe_allow_html=True)
 
 
+def format_qa_task_key(qa_task: str) -> str:
+    """Format QA task key for API calls."""
+    return f"|{qa_task}" if "SWDEV" in qa_task else ""
+
+
+def get_ticket_id(feature_id: str, qa_task: str) -> str:
+    """Construct full ticket ID from feature ID and QA task."""
+    return f"{feature_id}{format_qa_task_key(qa_task)}"
+
+
 def load_data(release: str, unique_key: int) -> pd.DataFrame:
-    """
-    Load data from JSON file with error handling.
-    
-    Args:
-        release: ROCm release version
-        unique_key: Unique key for the release
-        
-    Returns:
-        DataFrame containing the loaded data
-    """
+    """Load data with caching."""
     try:
         with st.spinner(f"⏳ Loading data for {release}..."):
             data = balance(rocm_version=release, unique_key=str(unique_key))
@@ -75,16 +66,7 @@ def load_data(release: str, unique_key: int) -> pd.DataFrame:
 
 
 def load_data_no_cache(release: str, unique_key: int) -> pd.DataFrame:
-    """
-    Load data without caching - always fetches fresh data from server.
-    
-    Args:
-        release: ROCm release version
-        unique_key: Unique key for the release
-        
-    Returns:
-        DataFrame containing the loaded data
-    """
+    """Load fresh data from server without caching."""
     try:
         tf = TicketFetch(max_workers=6, verbose=True, rocm_version=release, unique_key=str(unique_key))
         force_refetch_and_update(rocm_version=release, unique_key=str(unique_key))
@@ -95,45 +77,13 @@ def load_data_no_cache(release: str, unique_key: int) -> pd.DataFrame:
 
 
 def convert_df_to_csv(df: pd.DataFrame) -> bytes:
-    """
-    Convert DataFrame to CSV bytes for download.
-    
-    Args:
-        df: DataFrame to convert
-        
-    Returns:
-        CSV data as bytes
-    """
+    """Convert DataFrame to CSV bytes."""
     return df.to_csv(index=False).encode('utf-8')
 
 
-def configure_grid_options(df: pd.DataFrame) -> dict:
-    """
-    Configure AgGrid options for professional appearance.
-    
-    Args:
-        df: DataFrame to configure
-        
-    Returns:
-        Grid options dictionary
-    """
-    def format_comments(comments):
-        return "<br>".join(reversed(comments))
-    if "comments" in df.columns:
-        df["comments"] =  df["comments"].apply(format_comments)
-    
-    gb = GridOptionsBuilder.from_dataframe(df)
-    
-    # Enable filtering and sorting
-    gb.configure_default_column(
-        filter=True,
-        sortable=True,
-        resizable=True,
-        editable=False
-    )
-    
-    # JavaScript code for hyperlink rendering
-    cell_renderer = JsCode("""
+def get_cell_renderers() -> Dict[str, JsCode]:
+    """Get JavaScript cell renderers for AgGrid."""
+    url_renderer = JsCode("""
     class UrlCellRenderer {
         init(params) {
             this.eGui = document.createElement('span');
@@ -149,97 +99,127 @@ def configure_grid_options(df: pd.DataFrame) -> dict:
                 this.eGui.appendChild(link);
             }
         }
-        getGui() {
-            return this.eGui;
-        }
+        getGui() { return this.eGui; }
     }
     """)
     
-    # Custom cell renderer for comments with HTML support
-    comments_cell_renderer = JsCode("""
+    comments_renderer = JsCode("""
     class CommentsCellRenderer {
         init(params) {
             this.eGui = document.createElement('div');
             this.eGui.innerHTML = params.value || '';
             this.eGui.setAttribute('style', "white-space: normal; line-height: 1.5;");
         }
-        getGui() {
-            return this.eGui;
-        }
+        getGui() { return this.eGui; }
     }
     """)
     
-    # Special configuration for hyperlink columns
-    if "QA_task" in df.columns:
-        gb.configure_column(
-            "QA_task",
-            headerName="QA_task",
-            cellRenderer=cell_renderer,
-            filter="agTextColumnFilter",
-            width=200
-        )
+    return {'url': url_renderer, 'comments': comments_renderer}
+
+
+def configure_grid_options(df: pd.DataFrame) -> dict:
+    """Configure AgGrid options."""
+    # Format comments
+    if "comments" in df.columns:
+        df["comments"] = df["comments"].apply(lambda c: "<br>".join(reversed(c)))
     
-    if "Feature ID" in df.columns:
+    gb = GridOptionsBuilder.from_dataframe(df)
+    
+    # Default column configuration
+    gb.configure_default_column(
+        filter=True,
+        sortable=True,
+        resizable=True,
+        editable=False
+    )
+    
+    # Get cell renderers
+    renderers = get_cell_renderers()
+    
+    # Configure special columns
+    hyperlink_columns = {
+        "QA_task": {"headerName": "QA_task", "width": 200},
+        "Feature ID": {"headerName": "Feature Task Key", "width": 200, "pinned": 'left'}
+    }
+    
+    for col, config in hyperlink_columns.items():
+        if col in df.columns:
+            gb.configure_column(
+                col,
+                cellRenderer=renderers['url'],
+                filter="agTextColumnFilter",
+                **config
+            )
+    
+    # Configure comments column
+    if "comments" in df.columns:
         gb.configure_column(
-            "Feature ID",
-            headerName="Feature Task Key",
-            cellRenderer=cell_renderer,
-            filter="agTextColumnFilter",
-            width=200,
+            "comments",
+            wrapText=True,
+            autoHeight=True,
+            editable=False,
+            cellRenderer=renderers['comments'],
             pinned='left'
         )
     
-        if "comments" in df.columns:
-            gb.configure_column(
-                "comments", 
-                wrapText=True, 
-                autoHeight=True, 
-                editable=False,
-                cellRenderer=comments_cell_renderer,
-                pinned='left'
-            )
-    
-    # Enable pagination for better performance with large datasets
-    gb.configure_pagination(
-        enabled=True,
-        paginationAutoPageSize=False,
-        paginationPageSize=50
-    )
-    
-    # Enable sidebar for advanced filtering
+    # Grid options
+    gb.configure_pagination(enabled=True, paginationAutoPageSize=False, paginationPageSize=50)
     gb.configure_side_bar()
-    
-    # Enable grid options
-    gb.configure_selection(selection_mode='single', rowMultiSelectWithClick=True , use_checkbox=True)
+    gb.configure_selection(selection_mode='single', rowMultiSelectWithClick=True, use_checkbox=True)
     
     return gb.build()
 
 
-def render_release_section(release: str):
-    """
-    Render a single release section with its data and controls.
+def get_custom_css() -> Dict[str, Any]:
+    """Get custom CSS for AgGrid."""
+    return {
+        ".ag-root-wrapper": {
+            "border": "1px solid #e0e0e0",
+            "border-radius": "8px",
+            "overflow": "hidden"
+        },
+        ".ag-header": {
+            "background-color": "#f8f9fa",
+            "border-bottom": "2px solid #dee2e6"
+        },
+        ".ag-header-cell-label": {
+            "font-size": "13px",
+            "font-weight": "600",
+            "color": "#212529"
+        },
+        ".ag-cell": {
+            "font-size": "13px",
+            "color": "#495057",
+            "line-height": "1.5"
+        },
+        ".ag-row-hover": {
+            "background-color": "#f1f3f5 !important"
+        },
+        ".ag-floating-filter-input": {"font-size": "12px"},
+        ".ag-input-field-input": {"font-size": "12px"}
+    }
+
+
+def render_header_section(release: str, df: pd.DataFrame) -> bool:
+    """Render header section with controls. Returns True if force pull clicked."""
+    header_cols = st.columns([2, 2, 2, 2])
     
-    Args:
-        release: Release version to display
-    """
-    unique_key = get_rocm_unique_value(release)
-    loaded_df = load_data(release=release, unique_key=unique_key)
-    
-    # Header with Force Pull button
-    header_col1, header_col2, header_col3 , header_col4 = st.columns([2, 2,2,2])
-    with header_col1:
+    with header_cols[0]:
         st.markdown(f'<div class="release-header">📦 Release: {release}</div>', unsafe_allow_html=True)
-    with header_col2:
-        st.html(f"<div style='font-size: 22px;'>Total Tickets: {len(loaded_df)}</div>")
-    with header_col3:
+    
+    with header_cols[1]:
+        st.html(f"<div style='font-size: 22px;'>Total Tickets: {len(df)}</div>")
+    
+    with header_cols[2]:
         force_pull_btn = st.button(
-            "🔄 Force Pull", 
+            "🔄 Force Pull",
             key=f"force_pull_{release}",
             help=f"Fetch latest data for {release}"
         )
-    with header_col4:
+    
+    with header_cols[3]:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        csv_data = convert_df_to_csv(loaded_df)
+        csv_data = convert_df_to_csv(df)
         st.download_button(
             label="📥 Download CSV",
             data=csv_data,
@@ -248,15 +228,127 @@ def render_release_section(release: str):
             key=f"download_{release}"
         )
     
+    return force_pull_btn
+
+
+def handle_comment_submission(selected_row: Dict, release: str, new_comment: str) -> bool:
+    """Handle comment submission. Returns True if successful."""
+    if not new_comment.strip():
+        st.warning("⚠️ Please enter a comment before submitting.")
+        return False
+    
+    try:
+        ticket_id = get_ticket_id(selected_row['Feature ID'], selected_row['QA_task'])
+        ack = comments_addition(
+            ticket_id=ticket_id,
+            comment=new_comment,
+            rocm_version=release
+        )
+        if ack:
+            st.success(f"✅ Comment submitted for {selected_row['Feature ID']}!")
+            return True
+        return False
+    except Exception as e:
+        st.error(f"❌ Error submitting comment: {str(e)}")
+        return False
+
+
+def handle_effort_update(selected_row: Dict, release: str, new_effort: str) -> bool:
+    """Handle effort update. Returns True if successful."""
+    if new_effort == selected_row['Effort']:
+        return False
+    
+    try:
+        ticket_id = get_ticket_id(selected_row['Feature ID'], selected_row['QA_task'])
+        ack = update_effort(
+            ticket_id=ticket_id,
+            effort=new_effort,
+            rocm_version=release
+        )
+        return ack
+    except Exception as e:
+        st.error(f"❌ Error updating effort: {str(e)}")
+        return False
+
+
+def show_row_details_dialog(selected_row: Dict, release: str):
+    """Show dialog with row details and edit options."""
+    # Check if we should show dialog (not just after submission)
+    dialog_key = f"show_dialog_{selected_row['Feature ID']}_{release}"
+    if dialog_key not in st.session_state:
+        st.session_state[dialog_key] = True
+            
+    if st.session_state[dialog_key]:
+        @st.dialog(f"{selected_row['Feature ID']} comments")
+        def show_details():
+            # Display comments
+            st.write("### Comments")
+            comments = selected_row['comments'].split("<br>") if selected_row['comments'] else []
+            if comments and comments[0]:
+                for comment in comments:
+                    st.markdown(f"- {comment}")
+            else:
+                st.write("No comments found.")
+            
+            st.divider()
+            
+            # Effort selection - use session state to track changes
+            effort_key = f"effort_{selected_row['Feature ID']}_{release}"
+            
+            # Initialize session state if not exists
+            if effort_key not in st.session_state:
+                st.session_state[effort_key] = selected_row['Effort']
+            
+            current_effort = st.selectbox(
+                "Size of Ticket",
+                EFFORT_SIZES,
+                index=EFFORT_SIZES.index(st.session_state[effort_key]),
+                key=f"select_{effort_key}",
+                help="Select the effort type"
+            )
+            
+            # Check if effort changed and update
+            if current_effort != st.session_state[effort_key]:
+                if handle_effort_update(selected_row, release, current_effort):
+                    st.session_state[effort_key] = current_effort
+                    st.success("✅ Effort updated!")
+                    st.rerun()
+            
+            st.divider()
+            
+            # Add new comment
+            st.write("### Add New Comment")
+            new_comment = st.text_area(
+                "Enter your comment",
+                key=f"comment_input_{selected_row['Feature ID']}_{release}",
+                placeholder="Type your comment here..."
+            )
+            
+            if st.button("Submit Comment", key=f"submit_{selected_row['Feature ID']}_{release}", type="primary"):
+                if handle_comment_submission(selected_row, release, new_comment):
+                    st.session_state[dialog_key] = False
+                    st.rerun()
+        
+        show_details()
+
+
+def render_release_section(release: str):
+    """Render a single release section."""
+    unique_key = get_rocm_unique_value(release)
+    loaded_df = load_data(release=release, unique_key=unique_key)
+    
+    # Render header and check for force pull
+    force_pull = render_header_section(release, loaded_df)
+    
     # Load data
-    if force_pull_btn:
+    if force_pull:
         with st.spinner(f"⏳ Fetching latest data for {release}..."):
             df = load_data_no_cache(release=release, unique_key=unique_key)
             st.success(f"✅ Data refreshed for {release}!")
     else:
         df = loaded_df
     
-    # Check if DataFrame is empty
+    # Check if empty
     if df.empty:
         st.info(f"ℹ️ No data available for {release}")
         st.markdown('</div>', unsafe_allow_html=True)
@@ -268,42 +360,8 @@ def render_release_section(release: str):
         df = df.rename(columns={"_id": "Feature ID"})
     
     try:
-        # Configure grid
+        # Configure and display grid
         grid_options = configure_grid_options(df)
-        
-        # Custom CSS for AgGrid
-        custom_css = {
-            ".ag-root-wrapper": {
-                "border": "1px solid #e0e0e0",
-                "border-radius": "8px",
-                "overflow": "hidden"
-            },
-            ".ag-header": {
-                "background-color": "#f8f9fa",
-                "border-bottom": "2px solid #dee2e6"
-            },
-            ".ag-header-cell-label": {
-                "font-size": "13px",
-                "font-weight": "600",
-                "color": "#212529"
-            },
-            ".ag-cell": {
-                "font-size": "13px",
-                "color": "#495057",
-                "line-height": "1.5"
-            },
-            ".ag-row-hover": {
-                "background-color": "#f1f3f5 !important"
-            },
-            ".ag-floating-filter-input": {
-                "font-size": "12px"
-            },
-            ".ag-input-field-input": {
-                "font-size": "12px"
-            }
-        }
-        
-        # Display the grid
         grid_response = AgGrid(
             df,
             gridOptions=grid_options,
@@ -313,72 +371,16 @@ def render_release_section(release: str):
             update_mode=GridUpdateMode.VALUE_CHANGED,
             data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
             theme="alpine",
-            custom_css=custom_css,
+            custom_css=get_custom_css(),
             allow_unsafe_jscode=True,
             key=f"grid_{release}"
         )
         
-        # Display selected rows information
+        # Handle selected rows
         if grid_response['selected_rows'] is not None and len(grid_response['selected_rows']) > 0:
-            # Convert DataFrame to dict for the first row
             selected_row = grid_response['selected_rows'].iloc[0].to_dict()
-            
-            # Check if we should show dialog (not just after submission)
-            dialog_key = f"show_dialog_{selected_row['Feature ID']}_{release}"
-            if dialog_key not in st.session_state:
-                st.session_state[dialog_key] = True
-            
-            if st.session_state[dialog_key]:
-                @st.dialog(f"{selected_row['Feature ID']} comments")
-                def show_details():
-                    # Display existing comments
-                    comments = selected_row['comments'].split("<br>") if selected_row['comments'] else []
-                    st.write("### Comments")
-                    if len(comments) > 0 and comments[0]:
-                        for comment in comments:
-                            st.markdown(f"- {comment}")
-                    else:
-                        st.write("No comments found.")
-                    
-                    st.divider()
-                    
-                    # Add new comment section
-                    st.write("### Add New Comment")
-                    new_comment = st.text_area(
-                        "Enter your comment",
-                        key=f"comment_input_{selected_row['Feature ID']}_{release}",
-                        placeholder="Type your comment here...",
-                    )
-                    
-                    # Submit button
-                    if st.button("Submit Comment", key=f"submit_{selected_row['Feature ID']}_{release}", type="primary"):
-                        if new_comment.strip():
-                            try:
-                                qa_task_key = selected_row['QA_task']
-                                if "SWDEV" in qa_task_key:
-                                    qa_task_key = "|"+qa_task_key
-                                else:
-                                    qa_task_key = ""
-                                ack = comments_addition(
-                                    ticket_id=f"{selected_row['Feature ID']}{qa_task_key}",
-                                    comment=new_comment,
-                                    rocm_version=release
-                                )
-                                if ack:
-                                    st.success(f"✅ Comment submitted for {selected_row['Feature ID']}!")
-                                    # Hide dialog and trigger rerun
-                                    st.session_state[dialog_key] = False
-                                    st.rerun()
-                            except Exception as e:
-                                st.error(f"❌ Error submitting comment: {str(e)}")
-                        else:
-                            st.warning("⚠️ Please enter a comment before submitting.")
-                show_details()
-            else:
-                # Reset the dialog state for next selection
-                st.session_state[dialog_key] = True
-            
-
+            show_row_details_dialog(selected_row, release)
+    
     except Exception as e:
         st.error(f"❌ Error rendering grid: {str(e)}")
         st.info("💡 The data was loaded successfully but couldn't be displayed. Check the data format and try again.")
@@ -386,28 +388,27 @@ def render_release_section(release: str):
     st.markdown('</div>', unsafe_allow_html=True)
 
 
-rocm_versions = sorted(get_rocm_versions(), reverse=True)
-
-
-# Main application
-def main():    
-    # Info section
+def main():
+    """Main application entry point."""
+    rocm_versions = sorted(get_rocm_versions(), reverse=True)
+    
+    # Release selection
     selected_releases = st.multiselect(
         "Select Release Version(s)",
         rocm_versions,
         help="Select one or more release versions to view"
     )
     
-    # Check if any releases are selected
     if not selected_releases:
         st.info("ℹ️ Please select at least one release version to view data.")
         return
-
+    
     st.divider()
     
-    # Display data for each selected release
+    # Display each release
     for release in selected_releases:
         render_release_section(release)
+
 
 if __name__ == "__main__":
     main()
