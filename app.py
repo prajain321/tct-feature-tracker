@@ -108,7 +108,7 @@ def get_cell_renderers() -> Dict[str, JsCode]:
         init(params) {
             this.eGui = document.createElement('div');
             this.eGui.innerHTML = params.value || '';
-            this.eGui.setAttribute('style', "white-space: normal; line-height: 1.5;");
+            this.eGui.setAttribute('style', "white-space: normal; line-height: 1.5; font-weight: 700;");
         }
         getGui() { return this.eGui; }
     }
@@ -138,8 +138,10 @@ def configure_grid_options(df: pd.DataFrame) -> dict:
     
     # Configure special columns
     hyperlink_columns = {
-        "QA_task": {"headerName": "QA_task", "width": 200},
-        "Feature ID": {"headerName": "Feature Task Key", "width": 200, "pinned": 'left'}
+        "QA_task": {"headerName": "QA Task", "width": 200},
+        "Feature ID": {"headerName": "Feature Task Key", "width": 200, "pinned": 'left'},
+        "Auto_task": {"headerName": "Auto Task", "width": 200},
+        "TMS_task": {"headerName": "TMS Task", "width": 200}
     }
     
     for col, config in hyperlink_columns.items():
@@ -368,7 +370,7 @@ def render_release_section(release: str):
             enable_enterprise_modules='enterprise+AgCharts',
             fit_columns_on_grid_load=True,
             height=650,
-            update_mode=GridUpdateMode.VALUE_CHANGED,
+            update_mode=GridUpdateMode.NO_UPDATE,
             data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
             theme="alpine",
             custom_css=get_custom_css(),

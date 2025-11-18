@@ -4,9 +4,13 @@ from packages.database.schema import Database
 import json
 
 def comments_addition(rocm_version: str, ticket_id,comment):
-    # print(comment , rocm_version , ticket_id)
     db = Database(rocm_version)
-    return db.update_comments(ticket_id,comment)
+    comment_obj = {
+        "date": pd.Timestamp.now().strftime("%-d-%b"),
+        "comment": comment
+    }
+    final_comment = f"{comment_obj['date']} : {comment_obj['comment']}"
+    return db.update_comments(ticket_id,final_comment)
 
 def get_comments(rocm_version: str, ticket_id):
     db = Database(rocm_version)
