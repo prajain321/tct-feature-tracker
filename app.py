@@ -40,6 +40,34 @@ st.markdown("""
     }
     .block-container { padding-top: 1rem; }
     div[data-testid="stVerticalBlock"] > div:has(> div.element-container) { gap: 0rem; }
+    .metric-card {
+        background: white;
+        padding: 1rem;
+        border-radius: 8px;
+        border: 1px solid #e0e0e0;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        margin: 0.5rem;
+        min-width: 150px;
+        flex: 1 1 200px;
+    }
+    .metric-title {
+        font-size: 0.9rem;
+        color: #666;
+        font-weight: 500;
+        margin-bottom: 0.5rem;
+    }
+    .metric-value {
+        font-size: 1.8rem;
+        font-weight: 700;
+        color: #1f77b4;
+    }
+    .metrics-container {
+        display: flex;
+        flex-direction: row;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -79,6 +107,109 @@ def load_data_no_cache(release: str, unique_key: int) -> pd.DataFrame:
 def convert_df_to_csv(df: pd.DataFrame) -> bytes:
     """Convert DataFrame to CSV bytes."""
     return df.to_csv(index=False).encode('utf-8')
+
+
+def render_analytics_section(df: pd.DataFrame, release: str):
+    """Render analytics section with metrics and charts."""
+    st.markdown("### 📊 Analytics Dashboard")
+    
+    # Status Analytics
+    st.markdown("#### Status Distribution")
+    status_col1, status_col2 = st.columns([1, 2])
+    
+    with status_col1:
+        if 'Feature_status' in df.columns:
+            status_counts = df['Feature_status'].value_counts()
+            cards_html = []
+            for status, count in status_counts.items():
+                percentage = (count / len(df) * 100)
+                cards_html.append(f"""<div class="metric-card">
+                    <div class="metric-title">{status}</div>
+                    <div class="metric-value">{count} <span style="font-size:1rem;color:#666;">({percentage:.1f}%)</span></div>
+                </div>""")
+            
+            metrics_html = f'<div class="metrics-container">{"".join(cards_html)}</div>'
+            st.markdown(metrics_html, unsafe_allow_html=True)
+        else:
+            st.info("Feature_status column not found")
+    
+    with status_col2:
+        if 'Feature_status' in df.columns:
+            status_df = df['Feature_status'].value_counts().reset_index()
+            status_df.columns = ['Status', 'Count']
+            st.bar_chart(status_df.set_index('Status'))
+    
+    st.divider()
+    
+    # Assignee Analytics
+    st.markdown("#### Assignee Workload (Non-Implemented Tickets)")
+    # assignee_col1 = st.columns([1])
+    
+    # with assignee_col1:
+    if 'QA_assignee' in df.columns and 'QA_status' in df.columns:
+        non_implemented = df[df['QA_status'] != 'Implemented']
+        assignee_counts = non_implemented['QA_assignee'].value_counts().head(10)
+            
+        if len(assignee_counts) > 0:
+            cards_html = []
+            for assignee, count in assignee_counts.items():
+                cards_html.append(f"""<div class="metric-card">
+                    <div class="metric-title">{assignee}</div>
+                    <div class="metric-value">{count} <span style="font-size:0.9rem;color:#666;">tickets</span></div>
+                </div>""")
+                
+            metrics_html = f'<div class="metrics-container">{"".join(cards_html)}</div>'
+            st.markdown(metrics_html, unsafe_allow_html=True)
+        else:
+            st.success("✅ All tickets are implemented!")
+    else:
+        st.info("Assignee or Feature_status column not found")
+    
+    # with assignee_col2:
+    #     if 'Assignee' in df.columns and 'Feature_status' in df.columns:
+    #         non_implemented = df[df['Feature_status'] != 'Implemented']
+    #         if len(non_implemented) > 0:
+    #             assignee_df = non_implemented['Assignee'].value_counts().head(10).reset_index()
+    #             assignee_df.columns = ['Assignee', 'Count']
+    #             st.bar_chart(assignee_df.set_index('Assignee'))
+    
+    st.divider()
+    
+    # Effort Size Analytics
+    st.markdown("#### Effort Size Distribution")
+    effort_col1, effort_col2 = st.columns([1, 2])
+    
+    with effort_col1:
+        if 'Effort' in df.columns:
+            effort_counts = df['Effort'].value_counts()
+            # Sort by EFFORT_SIZES order
+            effort_counts = effort_counts.reindex(EFFORT_SIZES, fill_value=0)
+            
+            # Filter out zero counts and build HTML
+            cards_html = []
+            for effort, count in effort_counts.items():
+                if count > 0:
+                    percentage = (count / len(df) * 100)
+                    cards_html.append(f"""<div class="metric-card">
+                        <div class="metric-title">{effort}</div>
+                        <div class="metric-value">{count} <span style="font-size:1rem;color:#666;">({percentage:.1f}%)</span></div>
+                    </div>""")
+            
+            if cards_html:
+                metrics_html = f'<div class="metrics-container">{"".join(cards_html)}</div>'
+                st.markdown(metrics_html, unsafe_allow_html=True)
+            else:
+                st.info("No effort data available")
+        else:
+            st.info("Effort column not found")
+    
+    with effort_col2:
+        if 'Effort' in df.columns:
+            effort_df = df['Effort'].value_counts().reindex(EFFORT_SIZES, fill_value=0).reset_index()
+            effort_df.columns = ['Effort', 'Count']
+            st.bar_chart(effort_df.set_index('Effort'))
+    
+    st.divider()
 
 
 def get_cell_renderers() -> Dict[str, JsCode]:
@@ -130,7 +261,8 @@ def configure_grid_options(df: pd.DataFrame) -> dict:
         filter=True,
         sortable=True,
         resizable=True,
-        editable=False
+        editable=False,
+        min_column_width=250
     )
     
     # Get cell renderers
@@ -138,10 +270,10 @@ def configure_grid_options(df: pd.DataFrame) -> dict:
     
     # Configure special columns
     hyperlink_columns = {
-        "QA_task": {"headerName": "QA Task", "width": 200},
-        "Feature ID": {"headerName": "Feature Task Key", "width": 200, "pinned": 'left'},
-        "Auto_task": {"headerName": "Auto Task", "width": 200},
-        "TMS_task": {"headerName": "TMS Task", "width": 200}
+        "QA_task": {"headerName": "QA Task", "width": 400},
+        "Feature ID": {"headerName": "Feature Task Key", "width": 400, "pinned": 'left'},
+        "Auto_task": {"headerName": "Auto Task", "width": 400},
+        "TMS_task": {"headerName": "TMS Task", "width": 400}
     }
     
     for col, config in hyperlink_columns.items():
@@ -159,9 +291,11 @@ def configure_grid_options(df: pd.DataFrame) -> dict:
             "comments",
             wrapText=True,
             autoHeight=True,
+            autoWidth=True,
             editable=False,
             cellRenderer=renderers['comments'],
-            pinned='left'
+            pinned='left',
+            width=600
         )
     
     # Grid options
@@ -279,6 +413,10 @@ def show_row_details_dialog(selected_row: Dict, release: str):
     dialog_key = f"show_dialog_{selected_row['Feature ID']}_{release}"
     if dialog_key not in st.session_state:
         st.session_state[dialog_key] = True
+    
+    # if dailog_key is in session state, but false i want to see re-open dialog
+    if dialog_key in st.session_state and not st.session_state[dialog_key] and selected_row["comments"]!="":
+        st.session_state[dialog_key] = True
             
     if st.session_state[dialog_key]:
         @st.dialog(f"{selected_row['Feature ID']} comments")
@@ -314,7 +452,7 @@ def show_row_details_dialog(selected_row: Dict, release: str):
                 if handle_effort_update(selected_row, release, current_effort):
                     st.session_state[effort_key] = current_effort
                     st.success("✅ Effort updated!")
-                    st.rerun()
+                    # st.rerun()
             
             st.divider()
             
@@ -360,6 +498,9 @@ def render_release_section(release: str):
     if "_id" in df.columns:
         df["_id"] = df["_id"].astype(str).str.split("|").str[0]
         df = df.rename(columns={"_id": "Feature ID"})
+    
+    # Render Analytics Section
+    render_analytics_section(df, release)
     
     try:
         # Configure and display grid

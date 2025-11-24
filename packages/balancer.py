@@ -37,8 +37,7 @@ def force_refetch_and_update(rocm_version: str, unique_key: str):
     if not data or len(data) == 0:
         print("No data fetched")
         return False
-    
-    print(f"Fetched {len(data)} tickets")
+    # print(f"Fetched {len(data)} tickets")
     
     # Parse JSON if needed
     try:
@@ -47,9 +46,23 @@ def force_refetch_and_update(rocm_version: str, unique_key: str):
         print(f"Error parsing JSON: {e}")
         return False
     
+    # Create a set of fetched ticket IDs for quick lookup
+    fetched_ticket_ids = {ticket.get("_id") for ticket in tickets if ticket.get("_id")}
+    print(f"Fetched ticket IDs: {len(fetched_ticket_ids)}")
+    
+    # Get all existing tickets from database
+    existing_tickets = db.find_all()  # Assuming this method exists
+    # print(existing_tickets)
+    existing_ticket_ids = {ticket.get("_id") for ticket in existing_tickets if ticket.get("_id")}
+    print(f"Existing ticket IDs in DB: {len(existing_ticket_ids)}")
+    print(f"Tickets to delete: {len(existing_ticket_ids - fetched_ticket_ids)}")
+    # Find tickets to delete (present in DB but not in fetched data)
+    tickets_to_delete = existing_ticket_ids - fetched_ticket_ids
+    
     # Update/insert tickets
     updated_count = 0
     inserted_count = 0
+    deleted_count = 0
     error_count = 0
     
     for ticket in tickets:
@@ -98,12 +111,29 @@ def force_refetch_and_update(rocm_version: str, unique_key: str):
             print(f"Error processing ticket {ticket.get('_id', 'unknown')}: {e}")
             error_count += 1
     
+    # Delete tickets that are no longer in the fetched data
+    if tickets_to_delete:
+        print(f"\nDeleting {len(tickets_to_delete)} tickets not present in fetched data...")
+        for ticket_id in tickets_to_delete:
+            try:
+                result = db.delete(ticket_id)  # Assuming this method exists
+                if result:
+                    deleted_count += 1
+                    print(f"Deleted ticket: {ticket_id}")
+                else:
+                    print(f"Failed to delete ticket: {ticket_id}")
+                    error_count += 1
+            except Exception as e:
+                print(f"Error deleting ticket {ticket_id}: {e}")
+                error_count += 1
+    
     print(f"\nSummary:")
     print(f"  Updated: {updated_count}")
     print(f"  Inserted: {inserted_count}")
+    print(f"  Deleted: {deleted_count}")
     print(f"  Errors: {error_count}")
     
-    return updated_count + inserted_count > 0
+    return updated_count + inserted_count + deleted_count > 0
 
 def update_effort(rocm_version: str, ticket_id: str, effort: str):
     db = Database(rocm_version)

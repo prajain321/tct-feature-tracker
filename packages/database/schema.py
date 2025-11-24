@@ -49,7 +49,7 @@ class Database:
     def close(self):
         self.client.close()
 
-# arr = ['7.2', '7.1']
+# arr = ['7.1']
 # for i in arr:
 #     db=Database(i)
 #     print(db.delete_collection()) #db.delete_collection()
