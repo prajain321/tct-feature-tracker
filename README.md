@@ -1,25 +1,3 @@
-I’ve fetched the details from your current page. Here’s what I gathered:
-
-*   **Repository Name:** `tct-feature-tracker`
-*   **Owner:** `prajain321`
-*   **Language:** Python (100%)
-*   **Files Mentioned:**
-    *   `app.py` (main application logic)
-    *   `common.py`
-    *   `cron_update.py`
-    *   `requirements.txt`
-    *   `.gitignore`
-*   **Recent Commit:** Added clicking analytics section and UI enhancements
-*   **Description:** *Not provided yet*
-*   **No README exists currently**
-*   **No releases or packages published yet**
-
-***
-
-### ✅ Here’s a draft README for your project:
-
-***
-
 # **tct-feature-tracker**
 
 ## **Overview**
