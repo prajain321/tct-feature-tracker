@@ -7,6 +7,7 @@ from common import get_rocm_unique_value, get_rocm_versions
 from packages.balancer import balance, force_refetch_and_update, comments_addition, update_effort
 from datetime import datetime
 from typing import Optional, Dict, Any
+import streamlit.components.v1 as components
 
 # Constants
 JIRA_BASE_URL = "https://ontrack-internal.amd.com/browse/"
@@ -43,6 +44,7 @@ st.markdown("""
     .metric-card {
         background: white;
         padding: 1rem;
+        min-height: 18.6rem;
         border-radius: 8px;
         border: 1px solid #e0e0e0;
         box-shadow: 0 1px 3px rgba(0,0,0,0.1);
@@ -51,13 +53,13 @@ st.markdown("""
         flex: 1 1 200px;
     }
     .metric-title {
-        font-size: 0.9rem;
-        color: #666;
-        font-weight: 500;
+        font-size: 1.2rem;
+        color: black;
+        font-weight: 800;
         margin-bottom: 0.5rem;
     }
     .metric-value {
-        font-size: 1.8rem;
+        font-size: 1.1rem;
         font-weight: 700;
         color: #1f77b4;
     }
@@ -67,6 +69,61 @@ st.markdown("""
         flex-wrap: wrap;
         gap: 0.5rem;
         margin-bottom: 1rem;
+    }
+    .clickable-metric {
+        cursor: pointer;
+        transition: all 0.2s ease;
+        padding: 6px 8px;
+        border-radius: 4px;
+        margin: 2px 0;
+        position: relative;
+    }
+    .clickable-metric:hover {
+        background-color: #e3f2fd;
+        transform: translateX(2px);
+    }
+    .clickable-metric.active {
+        background-color: #1f77b4;
+    }
+    .clickable-metric.active .metric-label {
+        color: white !important;
+    }
+    .clickable-metric.active .metric-count {
+        color: white !important;
+    }
+    .filter-badge {
+        display: inline-block;
+        padding: 6px 12px;
+        background-color: #1f77b4;
+        color: white;
+        border-radius: 16px;
+        font-size: 0.9rem;
+        font-weight: 600;
+        margin-right: 8px;
+    }
+    .st-emotion-cache-8atqhb .st-emotion-cache-1anq8dj{
+        background-color: white;
+        color: black;
+        font-weight: 800;
+        border: none'
+    }
+    .stTooltipIcon .st-emotion-cache-1anq8dj{
+        background-color: rgb(19, 23, 32);
+        color: inherit;
+    }
+    .st-emotion-cache-8atqhb .st-emotion-cache-1anq8dj:hover{
+        background-color: #4fa3dd;
+        color: white;
+    }
+    .stTooltipIcon .st-emotion-cache-1anq8dj:hover{
+        background-color: rgba(250, 250, 250, 0.1);
+        color: inherit;
+    }
+    .st-emotion-cache-1krtkoa{
+        background-color: #1f77b4;
+        color: white;
+        font-weight: 800;
+        border: none
     }
     </style>
 """, unsafe_allow_html=True)
@@ -109,105 +166,226 @@ def convert_df_to_csv(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode('utf-8')
 
 
+def initialize_filter_state(release: str):
+    """Initialize filter state for a release."""
+    filter_key = f"filter_{release}"
+    if filter_key not in st.session_state:
+        st.session_state[filter_key] = {
+            'type': None,  # 'status', 'assignee', 'effort'
+            'value': None,
+            'column': None
+        }
+
+
+def set_filter(release: str, filter_type: str, value: str, column: str):
+    """Set active filter for a release."""
+    filter_key = f"filter_{release}"
+    current_filter = st.session_state[filter_key]
+    
+    # Toggle filter if clicking same value
+    if current_filter['type'] == filter_type and current_filter['value'] == value:
+        st.session_state[filter_key] = {'type': None, 'value': None, 'column': None}
+    else:
+        st.session_state[filter_key] = {
+            'type': filter_type,
+            'value': value,
+            'column': column
+        }
+
+
+def clear_filter(release: str):
+    """Clear active filter for a release."""
+    filter_key = f"filter_{release}"
+    st.session_state[filter_key] = {'type': None, 'value': None, 'column': None}
+
+
+def apply_filter(df: pd.DataFrame, release: str) -> pd.DataFrame:
+    """Apply active filter to DataFrame."""
+    filter_key = f"filter_{release}"
+    if filter_key not in st.session_state:
+        return df
+    
+    active_filter = st.session_state[filter_key]
+    
+    if active_filter['type'] and active_filter['value'] and active_filter['column']:
+        column = active_filter['column']
+        value = active_filter['value']
+        
+        if column in df.columns:
+            # For assignee filter with non-implemented status
+            if active_filter['type'] == 'assignee':
+                return df[(df[column] == value) & (df['QA_status'] != 'Implemented')]
+            else:
+                return df[df[column] == value]
+    
+    return df
+
+
+def create_clickable_html_component(release: str, items: list, filter_type: str, column: str, active_filter: dict):
+    """Create HTML component with JavaScript to handle clicks directly."""
+    
+    rows_html = []
+    for idx, (label, count, extra_info) in enumerate(items):
+        is_active = (active_filter['type'] == filter_type and active_filter['value'] == label)
+        active_class = 'active' if is_active else ''
+        safe_label = label.replace("'", "\\'")
+        
+        rows_html.append(f"""
+            <div class="clickable-metric {active_class}" 
+                 onclick="handleMetricClick('{release}', '{filter_type}', '{safe_label}', '{column}')">
+                <div class="metric-label" style="font-size: 0.9rem; color: black; font-weight:800">{label}</div>
+                <div class="metric-count" style="font-size: 1.2rem; font-weight: 600; color: #1f77b4;">{count} {extra_info}</div>
+            </div>""")
+    
+    html_content = f"""
+        <div class="metric-card">
+            {"".join(rows_html)}
+        </div>
+        <script>
+            function handleMetricClick(release, filterType, value, column) {{
+                // Send message to parent Streamlit window
+                window.parent.postMessage({{
+                    type: 'streamlit:setComponentValue',
+                    data: {{
+                        release: release,
+                        filterType: filterType,
+                        value: value,
+                        column: column
+                    }}
+                }}, '*');
+            }}
+        </script>
+    """
+    
+    return components.html(html_content, height=320)
+
+
 def render_analytics_section(df: pd.DataFrame, release: str):
     """Render analytics section with metrics and charts."""
-    st.markdown("### 📊 Analytics Dashboard")
+    
+    initialize_filter_state(release)
+    filter_key = f"filter_{release}"
+    active_filter = st.session_state[filter_key]
+    
+    # Show active filter badge and clear button
+    if active_filter['type']:
+        filter_col1, filter_col2 = st.columns([3, 1])
+        with filter_col1:
+            st.markdown(
+                f'<span class="filter-badge">🔍 Filtered by: {active_filter["value"]}</span>',
+                unsafe_allow_html=True
+            )
+        with filter_col2:
+            if st.button("✖ Clear Filter", key=f"clear_filter_{release}"):
+                clear_filter(release)
+                st.rerun()
+        st.markdown("<br>", unsafe_allow_html=True)
+    
+    # Create three columns for the three metric cards
+    col1, col2, col3,col4 = st.columns(4)
+    
+    # Use original unfiltered data for all counts
+    original_df = load_data(release=release, unique_key=get_rocm_unique_value(release))
     
     # Status Analytics
-    st.markdown("#### Status Distribution")
-    status_col1, status_col2 = st.columns([1, 2])
-    
-    with status_col1:
-        if 'Feature_status' in df.columns:
-            status_counts = df['Feature_status'].value_counts()
-            cards_html = []
-            for status, count in status_counts.items():
-                percentage = (count / len(df) * 100)
-                cards_html.append(f"""<div class="metric-card">
-                    <div class="metric-title">{status}</div>
-                    <div class="metric-value">{count} <span style="font-size:1rem;color:#666;">({percentage:.1f}%)</span></div>
-                </div>""")
-            
-            metrics_html = f'<div class="metrics-container">{"".join(cards_html)}</div>'
-            st.markdown(metrics_html, unsafe_allow_html=True)
-        else:
-            st.info("Feature_status column not found")
-    
-    with status_col2:
-        if 'Feature_status' in df.columns:
-            status_df = df['Feature_status'].value_counts().reset_index()
-            status_df.columns = ['Status', 'Count']
-            st.bar_chart(status_df.set_index('Status'))
-    
-    st.divider()
+    with col1:
+        st.markdown("**Status Distribution**")
+        with st.container(height=240):
+            if 'Feature_status' in df.columns:
+                status_counts = original_df['Feature_status'].value_counts()
+                
+                for idx, (status, count) in enumerate(status_counts.items(), 1):
+                    percentage = (count / len(original_df) * 100)
+                    is_active = (active_filter['type'] == 'status' and active_filter['value'] == status)
+                    
+                    button_label = f"{status}: {count} ({percentage:.1f}%)"
+                    button_type = "primary" if is_active else "secondary"
+                    
+                    if st.button(button_label, key=f"status_{release}_{idx}", 
+                            type=button_type, use_container_width=True):
+                        set_filter(release, 'status', status, 'Feature_status')
+                        st.rerun()
+            else:
+                st.info("Feature_status column not found")
     
     # Assignee Analytics
-    st.markdown("#### Assignee Workload (Non-Implemented Tickets)")
-    # assignee_col1 = st.columns([1])
-    
-    # with assignee_col1:
-    if 'QA_assignee' in df.columns and 'QA_status' in df.columns:
-        non_implemented = df[df['QA_status'] != 'Implemented']
-        assignee_counts = non_implemented['QA_assignee'].value_counts().head(10)
-            
-        if len(assignee_counts) > 0:
-            cards_html = []
-            for assignee, count in assignee_counts.items():
-                cards_html.append(f"""<div class="metric-card">
-                    <div class="metric-title">{assignee}</div>
-                    <div class="metric-value">{count} <span style="font-size:0.9rem;color:#666;">tickets</span></div>
-                </div>""")
+    with col2:
+        st.markdown("**QA Assignee (Non-Implemented)**")
+        with st.container(height=240):
+            if 'QA_assignee' in df.columns and 'QA_status' in df.columns:
+                non_implemented = original_df[original_df['QA_status'] != 'Implemented']
+                assignee_counts = non_implemented['QA_assignee'].value_counts()
                 
-            metrics_html = f'<div class="metrics-container">{"".join(cards_html)}</div>'
-            st.markdown(metrics_html, unsafe_allow_html=True)
-        else:
-            st.success("✅ All tickets are implemented!")
-    else:
-        st.info("Assignee or Feature_status column not found")
-    
-    # with assignee_col2:
-    #     if 'Assignee' in df.columns and 'Feature_status' in df.columns:
-    #         non_implemented = df[df['Feature_status'] != 'Implemented']
-    #         if len(non_implemented) > 0:
-    #             assignee_df = non_implemented['Assignee'].value_counts().head(10).reset_index()
-    #             assignee_df.columns = ['Assignee', 'Count']
-    #             st.bar_chart(assignee_df.set_index('Assignee'))
-    
-    st.divider()
+                if len(assignee_counts) > 0:
+                    for idx, (assignee, count) in enumerate(assignee_counts.items(), 1):
+                        is_active = (active_filter['type'] == 'assignee' and active_filter['value'] == assignee)
+                        
+                        button_label = f"{assignee}: {count}"
+                        button_type = "primary" if is_active else "secondary"
+                        
+                        if st.button(button_label, key=f"assignee_{release}_{idx}",
+                                type=button_type, use_container_width=True):
+                            set_filter(release, 'assignee', assignee, 'QA_assignee')
+                            st.rerun()
+                else:
+                    st.success("✅ All tickets implemented!")
+            else:
+                st.info("Column not found")
     
     # Effort Size Analytics
-    st.markdown("#### Effort Size Distribution")
-    effort_col1, effort_col2 = st.columns([1, 2])
-    
-    with effort_col1:
-        if 'Effort' in df.columns:
-            effort_counts = df['Effort'].value_counts()
-            # Sort by EFFORT_SIZES order
-            effort_counts = effort_counts.reindex(EFFORT_SIZES, fill_value=0)
-            
-            # Filter out zero counts and build HTML
-            cards_html = []
-            for effort, count in effort_counts.items():
-                if count > 0:
-                    percentage = (count / len(df) * 100)
-                    cards_html.append(f"""<div class="metric-card">
-                        <div class="metric-title">{effort}</div>
-                        <div class="metric-value">{count} <span style="font-size:1rem;color:#666;">({percentage:.1f}%)</span></div>
-                    </div>""")
-            
-            if cards_html:
-                metrics_html = f'<div class="metrics-container">{"".join(cards_html)}</div>'
-                st.markdown(metrics_html, unsafe_allow_html=True)
+    with col3:
+        st.markdown("**Effort Distribution**")
+        with st.container(height=240):
+            if 'Effort' in df.columns:
+                effort_counts = original_df['Effort'].value_counts()
+                effort_counts = effort_counts.reindex(EFFORT_SIZES, fill_value=0)
+                
+                btn_idx = 1
+                for effort, count in effort_counts.items():
+                    if count > 0:
+                        percentage = (count / len(original_df) * 100)
+                        is_active = (active_filter['type'] == 'effort' and active_filter['value'] == effort)
+                        
+                        button_label = f"{effort}: {count} ({percentage:.1f}%)"
+                        button_type = "primary" if is_active else "secondary"
+                        
+                        if st.button(button_label, key=f"effort_{release}_{btn_idx}",
+                                type=button_type, use_container_width=True):
+                            set_filter(release, 'effort', effort, 'Effort')
+                            st.rerun()
+                        btn_idx += 1
+                
+                if btn_idx == 1:
+                    st.info("No effort data available")
             else:
-                st.info("No effort data available")
-        else:
-            st.info("Effort column not found")
-    
-    with effort_col2:
-        if 'Effort' in df.columns:
-            effort_df = df['Effort'].value_counts().reindex(EFFORT_SIZES, fill_value=0).reset_index()
-            effort_df.columns = ['Effort', 'Count']
-            st.bar_chart(effort_df.set_index('Effort'))
+                st.info("Effort column not found")
+            
+    with col4:
+        st.markdown("**QA Assignee (Implemented)**")
+        # Remove the outer container - it's not needed
+        with st.container(height=240):  # scrolling is automatic when height is set
+            if 'QA_assignee' in df.columns and 'QA_status' in df.columns:
+                implemented = df[df['QA_status'] == 'Implemented']
+                assignee_counts = implemented['QA_assignee'].value_counts()
+                
+                if len(assignee_counts) > 0:
+                    for idx, (assignee, count) in enumerate(assignee_counts.items(), 1):
+                        is_active = (active_filter['type'] == 'assignee_impl' and 
+                                active_filter['value'] == assignee)
+                        
+                        button_label = f"{assignee}: {count}"
+                        button_type = "primary" if is_active else "secondary"
+                        
+                        if st.button(button_label, 
+                                key=f"assignee_impl_{release}_{assignee}_{idx}",
+                                type=button_type, 
+                                use_container_width=True):
+                            set_filter(release, 'assignee_impl', assignee, 'QA_assignee')
+                            st.rerun()
+                else:
+                    st.success("✅ All tickets implemented!")
+            else:
+                st.info("Column not found")
     
     st.divider()
 
@@ -270,10 +448,10 @@ def configure_grid_options(df: pd.DataFrame) -> dict:
     
     # Configure special columns
     hyperlink_columns = {
-        "QA_task": {"headerName": "QA Task", "width": 400},
-        "Feature ID": {"headerName": "Feature Task Key", "width": 400, "pinned": 'left'},
-        "Auto_task": {"headerName": "Auto Task", "width": 400},
-        "TMS_task": {"headerName": "TMS Task", "width": 400}
+        "QA_task": {"headerName": "QA Task", "width": 200},
+        "Feature ID": {"headerName": "Feature Task Key", "width": 200, "pinned": 'left'},
+        "Auto_task": {"headerName": "Auto Task", "width": 200},
+        "TMS_task": {"headerName": "TMS Task", "width": 200}
     }
     
     for col, config in hyperlink_columns.items():
@@ -295,7 +473,7 @@ def configure_grid_options(df: pd.DataFrame) -> dict:
             editable=False,
             cellRenderer=renderers['comments'],
             pinned='left',
-            width=600
+            width=200
         )
     
     # Grid options
@@ -336,7 +514,7 @@ def get_custom_css() -> Dict[str, Any]:
     }
 
 
-def render_header_section(release: str, df: pd.DataFrame) -> bool:
+def render_header_section(release: str, df: pd.DataFrame, filtered_count: int) -> bool:
     """Render header section with controls. Returns True if force pull clicked."""
     header_cols = st.columns([2, 2, 2, 2])
     
@@ -344,7 +522,10 @@ def render_header_section(release: str, df: pd.DataFrame) -> bool:
         st.markdown(f'<div class="release-header">📦 Release: {release}</div>', unsafe_allow_html=True)
     
     with header_cols[1]:
-        st.html(f"<div style='font-size: 22px;'>Total Tickets: {len(df)}</div>")
+        if filtered_count < len(df):
+            st.html(f"<div style='font-size: 22px;'>Showing: {filtered_count} / {len(df)} Tickets</div>")
+        else:
+            st.html(f"<div style='font-size: 22px;'>Total Tickets: {len(df)}</div>")
     
     with header_cols[2]:
         force_pull_btn = st.button(
@@ -409,19 +590,16 @@ def handle_effort_update(selected_row: Dict, release: str, new_effort: str) -> b
 
 def show_row_details_dialog(selected_row: Dict, release: str):
     """Show dialog with row details and edit options."""
-    # Check if we should show dialog (not just after submission)
     dialog_key = f"show_dialog_{selected_row['Feature ID']}_{release}"
     if dialog_key not in st.session_state:
         st.session_state[dialog_key] = True
     
-    # if dailog_key is in session state, but false i want to see re-open dialog
     if dialog_key in st.session_state and not st.session_state[dialog_key] and selected_row["comments"]!="":
         st.session_state[dialog_key] = True
             
     if st.session_state[dialog_key]:
         @st.dialog(f"{selected_row['Feature ID']} comments")
         def show_details():
-            # Display comments
             st.write("### Comments")
             comments = selected_row['comments'].split("<br>") if selected_row['comments'] else []
             if comments and comments[0]:
@@ -432,10 +610,8 @@ def show_row_details_dialog(selected_row: Dict, release: str):
             
             st.divider()
             
-            # Effort selection - use session state to track changes
             effort_key = f"effort_{selected_row['Feature ID']}_{release}"
             
-            # Initialize session state if not exists
             if effort_key not in st.session_state:
                 st.session_state[effort_key] = selected_row['Effort']
             
@@ -447,16 +623,13 @@ def show_row_details_dialog(selected_row: Dict, release: str):
                 help="Select the effort type"
             )
             
-            # Check if effort changed and update
             if current_effort != st.session_state[effort_key]:
                 if handle_effort_update(selected_row, release, current_effort):
                     st.session_state[effort_key] = current_effort
                     st.success("✅ Effort updated!")
-                    # st.rerun()
             
             st.divider()
             
-            # Add new comment
             st.write("### Add New Comment")
             new_comment = st.text_area(
                 "Enter your comment",
@@ -477,16 +650,26 @@ def render_release_section(release: str):
     unique_key = get_rocm_unique_value(release)
     loaded_df = load_data(release=release, unique_key=unique_key)
     
-    # Render header and check for force pull
-    force_pull = render_header_section(release, loaded_df)
-    
     # Load data
+    force_pull = False
+    if not loaded_df.empty:
+        # Render analytics first (with unfiltered data for counts)
+        render_analytics_section(loaded_df, release)
+        
+        # Apply filter to get display data
+        filtered_df = apply_filter(loaded_df.copy(), release)
+        
+        # Render header
+        force_pull = render_header_section(release, loaded_df, len(filtered_df))
+    
     if force_pull:
         with st.spinner(f"⏳ Fetching latest data for {release}..."):
             df = load_data_no_cache(release=release, unique_key=unique_key)
             st.success(f"✅ Data refreshed for {release}!")
+            clear_filter(release)
+            st.rerun()
     else:
-        df = loaded_df
+        df = filtered_df if not loaded_df.empty else loaded_df
     
     # Check if empty
     if df.empty:
@@ -498,9 +681,6 @@ def render_release_section(release: str):
     if "_id" in df.columns:
         df["_id"] = df["_id"].astype(str).str.split("|").str[0]
         df = df.rename(columns={"_id": "Feature ID"})
-    
-    # Render Analytics Section
-    render_analytics_section(df, release)
     
     try:
         # Configure and display grid
@@ -539,7 +719,7 @@ def main():
     selected_releases = st.multiselect(
         "Select Release Version(s)",
         rocm_versions,
-        help="Select one or more release versions to view"
+        help="Select one or more release versions to view data"
     )
     
     if not selected_releases:
