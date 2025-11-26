@@ -60,7 +60,3 @@ streamlit run app.py
 ## **Contributing**
 
 Feel free to fork the repository and submit pull requests for improvements.
-
-***
-
-Would you like me to **create this README file and add it to your repository** (as `README.md`), or should I **give you the markdown content to copy-paste**?

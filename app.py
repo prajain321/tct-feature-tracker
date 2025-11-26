@@ -289,7 +289,7 @@ def render_analytics_section(df: pd.DataFrame, release: str):
     
     # Status Analytics
     with col1:
-        st.markdown("**Status Distribution**")
+        st.markdown("**Feature Status**")
         with st.container(height=240):
             if 'Feature_status' in df.columns:
                 status_counts = original_df['Feature_status'].value_counts()
@@ -333,8 +333,8 @@ def render_analytics_section(df: pd.DataFrame, release: str):
                 st.info("Column not found")
     
     # Effort Size Analytics
-    with col3:
-        st.markdown("**Effort Distribution**")
+    with col4:
+        st.markdown("**Effort Size**")
         with st.container(height=240):
             if 'Effort' in df.columns:
                 effort_counts = original_df['Effort'].value_counts()
@@ -360,7 +360,7 @@ def render_analytics_section(df: pd.DataFrame, release: str):
             else:
                 st.info("Effort column not found")
             
-    with col4:
+    with col3:
         st.markdown("**QA Assignee (Implemented)**")
         # Remove the outer container - it's not needed
         with st.container(height=240):  # scrolling is automatic when height is set
