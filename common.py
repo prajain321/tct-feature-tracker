@@ -144,9 +144,12 @@ rocm_mapping = {
     "8.2.0": 5192618
 }
 
+
 def get_rocm_unique_value(version: str) -> int:
     """Return the numeric value for a given ROCm version string."""
     return rocm_mapping.get(version, None)
 
+
 def get_rocm_versions():
+    """Return a list of all ROCm version strings."""
     return list(rocm_mapping.keys())

@@ -1,80 +1,122 @@
-from packages.ticketfetchers.ticket_fetcher_optimized import TicketFetch
-import pandas as pd
-from packages.database.schema import Database
+"""Ticket balancing and synchronization module.
+
+This module provides functionality for managing and synchronizing tickets between
+JIRA and a local database. It handles ticket fetching, updating, insertion,
+deletion, comments management, and effort tracking for ROCm version tickets.
+"""
 import json
 
-def comments_addition(rocm_version: str, ticket_id,comment):
+import pandas as pd
+
+from packages.database.schema import Database  # pylint: disable=import-error
+from packages.ticketfetchers.ticket_fetcher_optimized import TicketFetch  # pylint: disable=import-error
+
+
+def comments_addition(rocm_version: str, ticket_id, comment):
+    """Add a comment to a ticket in the database.
+
+    Args:
+        rocm_version: The ROCm version identifier
+        ticket_id: The ticket identifier
+        comment: The comment text to add
+
+    Returns:
+        bool: True if comment was added successfully, False otherwise
+    """
     db = Database(rocm_version)
     comment_obj = {
         "date": pd.Timestamp.now().strftime("%-d-%b"),
         "comment": comment
     }
     final_comment = f"{comment_obj['date']} : {comment_obj['comment']}"
-    return db.update_comments(ticket_id,final_comment)
+    return db.update_comments(ticket_id, final_comment)
+
 
 def get_comments(rocm_version: str, ticket_id):
+    """Retrieve comments for a specific ticket.
+
+    Args:
+        rocm_version: The ROCm version identifier
+        ticket_id: The ticket identifier
+
+    Returns:
+        list: List of comments for the ticket
+    """
     db = Database(rocm_version)
     result = db.find(ticket_id)
     return result["comments"]
 
+
 def force_refetch_and_update(rocm_version: str, unique_key: str):
+    """Force refetch tickets from JIRA and update the database.
+
+    Fetches latest ticket data, updates existing tickets, inserts new ones,
+    and deletes tickets that are no longer present.
+
+    Args:
+        rocm_version: The ROCm version identifier
+        unique_key: Unique key for the ticket fetch operation
+
+    Returns:
+        bool: True if any updates/inserts/deletes occurred, False otherwise
+    """
     db = Database(rocm_version)
-    
+
     # Check if collection exists
     if not db.iscollection_present():
         print("Collection not present. Creating...")
         # Optionally create collection here or return False
         return False
-    
+
     print("Collection present")
-    
+
     # Fetch tickets
-    tf = TicketFetch(rocm_version=rocm_version, unique_key=unique_key, 
+    tf = TicketFetch(rocm_version=rocm_version, unique_key=unique_key,
                      verbose=True, is_json=True, max_workers=6)
     data = tf.fetch_tickets()
-    
+
     # Validate data
     if not data or len(data) == 0:
         print("No data fetched")
         return False
     # print(f"Fetched {len(data)} tickets")
-    
+
     # Parse JSON if needed
     try:
         tickets = json.loads(data) if isinstance(data, str) else data
+        print("tickets My", tickets)
     except json.JSONDecodeError as e:
         print(f"Error parsing JSON: {e}")
         return False
-    
+
     # Create a set of fetched ticket IDs for quick lookup
-    fetched_ticket_ids = {ticket.get("_id") for ticket in tickets if ticket.get("_id")}
+    fetched_ticket_ids = {ticket.get("_id")
+                          for ticket in tickets if ticket.get("_id")}
     print(f"Fetched ticket IDs: {len(fetched_ticket_ids)}")
-    
+
     # Get all existing tickets from database
     existing_tickets = db.find_all()  # Assuming this method exists
     # print(existing_tickets)
-    existing_ticket_ids = {ticket.get("_id") for ticket in existing_tickets if ticket.get("_id")}
+    existing_ticket_ids = {ticket.get(
+        "_id") for ticket in existing_tickets if ticket.get("_id")}
     print(f"Existing ticket IDs in DB: {len(existing_ticket_ids)}")
-    print(f"Tickets to delete: {len(existing_ticket_ids - fetched_ticket_ids)}")
+    print(
+        f"Tickets to delete: {len(existing_ticket_ids - fetched_ticket_ids)}")
     # Find tickets to delete (present in DB but not in fetched data)
     tickets_to_delete = existing_ticket_ids - fetched_ticket_ids
-    
     # Update/insert tickets
     updated_count = 0
     inserted_count = 0
     deleted_count = 0
     error_count = 0
-    
     for ticket in tickets:
         try:
             ticket_id = ticket.get("_id")
             if not ticket_id:
                 print(f"Warning: Ticket missing _id: {ticket}")
                 continue
-            
             # Check if ticket exists
             existing = db.find(ticket_id)
-            
             if existing:
                 # Update existing ticket
                 update_data = {
@@ -89,7 +131,6 @@ def force_refetch_and_update(rocm_version: str, unique_key: str):
                     'TMS_task': ticket.get("TMS_task"),
                     'TMS_status': ticket.get("TMS_status"),
                 }
-                
                 result = db.update(ticket_id, update_data)
                 if result:
                     updated_count += 1
@@ -106,14 +147,14 @@ def force_refetch_and_update(rocm_version: str, unique_key: str):
                 else:
                     print(f"Failed to insert ticket: {ticket_id}")
                     error_count += 1
-                    
-        except Exception as e:
-            print(f"Error processing ticket {ticket.get('_id', 'unknown')}: {e}")
+        except Exception as e:  # pylint: disable=broad-except
+            print(
+                f"Error processing ticket {ticket.get('_id', 'unknown')}: {e}")
             error_count += 1
-    
     # Delete tickets that are no longer in the fetched data
     if tickets_to_delete:
-        print(f"\nDeleting {len(tickets_to_delete)} tickets not present in fetched data...")
+        print(
+            f"\nDeleting {len(tickets_to_delete)} tickets not present in fetched data...")
         for ticket_id in tickets_to_delete:
             try:
                 result = db.delete(ticket_id)  # Assuming this method exists
@@ -123,40 +164,62 @@ def force_refetch_and_update(rocm_version: str, unique_key: str):
                 else:
                     print(f"Failed to delete ticket: {ticket_id}")
                     error_count += 1
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-except
                 print(f"Error deleting ticket {ticket_id}: {e}")
                 error_count += 1
-    
-    print(f"\nSummary:")
+    print("\nSummary:")
     print(f"  Updated: {updated_count}")
     print(f"  Inserted: {inserted_count}")
     print(f"  Deleted: {deleted_count}")
     print(f"  Errors: {error_count}")
-    
     return updated_count + inserted_count + deleted_count > 0
 
+
 def update_effort(rocm_version: str, ticket_id: str, effort: str):
+    """Update the effort size for a ticket.
+
+    Args:
+        rocm_version: The ROCm version identifier
+        ticket_id: The ticket identifier
+        effort: The effort size (e.g., 'S', 'M', 'L', 'XL')
+
+    Returns:
+        bool: True if effort was updated successfully, False otherwise
+    """
     db = Database(rocm_version)
-    return db.update_effort(ticket_id,effort)
+    return db.update_effort(ticket_id, effort)
+
 
 def balance(rocm_version: str, unique_key: str):
+    """Balance and sync tickets between JIRA and database.
+
+    Checks if database collection exists. If yes, returns existing data.
+    If no, fetches tickets from JIRA and populates the database.
+
+    Args:
+        rocm_version: The ROCm version identifier
+        unique_key: Unique key for the ticket fetch operation
+
+    Returns:
+        list: List of all tickets, or False if operation fails
+    """
     db = Database(rocm_version)
     if db.iscollection_present():
         return list(db.find_all())
     else:
         print("Collection not present, fetching tickets...")
-        tf = TicketFetch(rocm_version=rocm_version, unique_key=unique_key, 
-                        verbose=True, is_json=True, max_workers=6)
-        
+        tf = TicketFetch(rocm_version=rocm_version, unique_key=unique_key,
+                         verbose=True, is_json=True, max_workers=6)
+
         try:
             data = tf.fetch_tickets()
             tickets = json.loads(data) if isinstance(data, str) else data
-            
+
             if db.insert(tickets):
                 return list(db.find_all())
             else:
                 print("Failed to insert tickets")
                 return False
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             print(f"Error in balance: {e}")
             return False
