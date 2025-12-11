@@ -4,3 +4,4 @@ streamlit-aggrid
 pandas
 jira
 dotenv
+schedule
